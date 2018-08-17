@@ -1,0 +1,17 @@
+{
+  "http.port": 8080,
+  "amqp.host": "",
+  "amqp.port": 443,
+  "amqp.user": "user",
+  "amqp.password": "password",
+  "amqp.consumer.driver-command": "topic-driver-command",
+  "amqp.producer.driver-event": "topic-driver-event",
+  "amqp.producer.ride-event": "topic-ride-event",
+  "amqp.replyhandling": false,
+  "amqp.ssl": true,
+  "amqp.ssl.trustall": true,
+  "amqp.ssl.verifyhost": false,
+  "amqp.truststore.path": "/app/truststore/enmasse.jks",
+  "amqp.truststore.password": "password",
+  "logging.factor": 1
+}

@@ -1,0 +1,19 @@
+amqp.host:
+amqp.port: 5671
+amqp.user: user
+amqp.password: password
+
+amqp.replyhandling: false
+amqp.ssl: true
+amqp.ssl.trustall: false
+amqp.ssl.verifyhost: true
+amqp.truststore.path: /app/truststore/enmasse.jks
+amqp.truststore.password: password
+
+amqp.consumer.driver-command: topic-driver-command
+amqp.producer.driver-event: topic-driver-event
+amqp.producer.ride-event: topic-ride-event
+
+http.port: 8080
+
+logging.factor: 1
