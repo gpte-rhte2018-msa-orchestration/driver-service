@@ -78,18 +78,40 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     private void handleMessage(Message<JsonObject> msg) {
 
-        if (dropAssignDriverEvent()) {
+        if (dropAssignDriverEvent(getRideId(msg.body()))) {
             msg.reply(null);
             return;
         }
         sendDriverAssignedMessage(msg, getDriverId());
     }
 
-    private boolean dropAssignDriverEvent() {
+    private boolean dropAssignDriverEvent(String rideId) {
+        try {
+            UUID uuid = UUID.fromString(rideId);
+            long leastSignificantBits = uuid.getLeastSignificantBits() & 0x0000000F;
+            if (leastSignificantBits == 15) {
+                log.info("Dropping 'AssignedDriverEvent' for rideId " + rideId);
+                return true;
+            }
+        } catch (IllegalArgumentException e) {
+            // rideId is not an UUID
+            return false;
+        }
         return false;
     }
 
-    private boolean dropRideStartedEvent() {
+    private boolean dropRideStartedEvent(String rideId) {
+        try {
+            UUID uuid = UUID.fromString(rideId);
+            long leastSignificantBits = uuid.getLeastSignificantBits() & 0x0000000F;
+            if (leastSignificantBits == 14) {
+                log.info("Dropping 'RideStartedEvent' for rideId " + rideId);
+                return true;
+            }
+        } catch (IllegalArgumentException e) {
+            // rideId is not an UUID
+            return false;
+        }
         return false;
     }
 
@@ -105,7 +127,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
     }
 
     private void sendRideStartedEventMessage(final Message<JsonObject> msgIn) {
-        if (dropRideStartedEvent()) {
+        if (dropRideStartedEvent(getRideId(msgIn.body()))) {
             msgIn.reply(null);
             return;
         }
@@ -187,6 +209,10 @@ public class MessageProducerVerticle extends AbstractVerticle {
         annotations.put("x-opt-jms-msg-type", b);
         amqpMsg.put(AmqpConstants.MESSAGE_ANNOTATIONS, annotations);
         messageProducer.send(amqpMsg);
+    }
+
+    private String getRideId(JsonObject message) {
+        return message.getJsonObject("payload").getString("rideId");
     }
 
     private void handleExceptions(Throwable t) {
