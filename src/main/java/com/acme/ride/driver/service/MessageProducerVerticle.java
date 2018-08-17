@@ -116,7 +116,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
     }
 
     private String getDriverId() {
-        return "driver" + 100;
+        return "driver" + randomInteger(100, 200).intValue();
     }
 
     private void sendDriverAssignedMessage(final Message<JsonObject> msgIn, final String driverId) {
