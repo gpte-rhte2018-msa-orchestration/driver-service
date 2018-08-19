@@ -27,17 +27,17 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     private MessageProducer<JsonObject> rideEventProducer;
 
-    private int minDelayBeforeDriverAssignedEvent = 1;
+    private int minDelayBeforeDriverAssignedEvent;
 
-    private int maxDelayBeforeDriverAssignedEvent = 3;
+    private int maxDelayBeforeDriverAssignedEvent;
 
-    private int minDelayBeforeRideStartedEvent = 1;
+    private int minDelayBeforeRideStartedEvent;
 
-    private int maxDelayBeforeRideStartedEvent = 3;
+    private int maxDelayBeforeRideStartedEvent;
 
-    private int minDelayBeforeRideEndedEvent = 1;
+    private int minDelayBeforeRideEndedEvent;
 
-    private int maxDelayBeforeRideEndedEvent = 3;
+    private int maxDelayBeforeRideEndedEvent;
 
     @Override
     public void start(Future<Void> startFuture) throws Exception {
@@ -68,6 +68,12 @@ public class MessageProducerVerticle extends AbstractVerticle {
                 startFuture.complete();
             }
         });
+        minDelayBeforeDriverAssignedEvent = config().getInteger("driver.assigned.min.delay", 1);
+        maxDelayBeforeDriverAssignedEvent = config().getInteger("driver.assigned.max.delay", 3);
+        minDelayBeforeRideStartedEvent = config().getInteger("ride.started.min.delay", 5);
+        maxDelayBeforeRideStartedEvent = config().getInteger("ride.started.max.delay", 10);
+        minDelayBeforeRideEndedEvent = config().getInteger("ride.ended.min.delay", 5);
+        maxDelayBeforeRideEndedEvent = config().getInteger("ride.ended.max.delay", 10);
     }
 
     private void bridgeStarted() {
