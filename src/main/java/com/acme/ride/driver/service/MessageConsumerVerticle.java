@@ -1,7 +1,6 @@
 package com.acme.ride.driver.service;
 
 import java.io.UnsupportedEncodingException;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import io.vertx.amqpbridge.AmqpBridge;
 import io.vertx.amqpbridge.AmqpBridgeOptions;
@@ -19,10 +18,6 @@ public class MessageConsumerVerticle extends AbstractVerticle {
     private final static Logger log = LoggerFactory.getLogger("MessageConsumer");
 
     private AmqpBridge bridge;
-
-    private AtomicInteger counter = new AtomicInteger(0);
-
-    private int factor;
 
     @Override
     public void start(Future<Void> startFuture) throws Exception {
@@ -52,7 +47,6 @@ public class MessageConsumerVerticle extends AbstractVerticle {
                 startFuture.complete();
             }
         });
-        factor = config().getInteger("logging.factor", 1);
     }
 
     private void bridgeStarted() {
@@ -81,10 +75,7 @@ public class MessageConsumerVerticle extends AbstractVerticle {
                 log.warn("Unexpected message type '" + messageType + "' in message " + message + ". Ignoring message");
                 return;
             }
-            int count = counter.incrementAndGet();
-            if (count % factor == 0) {
-                log.info("Consumed 'AssignedDriverCommand' messages:" + count + ". Last message: " + message);
-            }
+            log.info("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
             // send message to producer verticle
             vertx.eventBus().<JsonObject>send("message-producer", message, ar -> {
                 if (!ar.succeeded()) {

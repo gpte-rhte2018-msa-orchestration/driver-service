@@ -13,7 +13,6 @@
   "amqp.ssl.verifyhost": false,
   "amqp.truststore.path": "/app/truststore/enmasse.jks",
   "amqp.truststore.password": "password",
-  "logging.factor": 1,
   "driver.assigned.min.delay": 1,
   "driver.assigned.max.delay": 3,
   "ride.started.min.delay": 5,

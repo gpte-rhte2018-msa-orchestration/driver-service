@@ -16,8 +16,6 @@ amqp.producer.ride-event: topic-ride-event
 
 http.port: 8080
 
-logging.factor: 1
-
 # delay before sending a `DriverAssignedEvent` message
 driver.assigned.min.delay: 1
 driver.assigned.max.delay: 3

@@ -169,11 +169,13 @@ public class MessageProducerVerticle extends AbstractVerticle {
         msgOut.put("sender", "DriverServiceSimulator");
         msgOut.put("timestamp", Instant.now().toEpochMilli());
         JsonObject payload = new JsonObject();
-        payload.put("rideId", msgIn.getJsonObject("payload").getString("rideId"));
+        String rideId = msgIn.getJsonObject("payload").getString("rideId");
+        payload.put("rideId", rideId);
         payload.put("driverId", driverId);
         msgOut.put("payload", payload);
 
         sendMessageToTopic(msgOut, driverEventProducer);
+        log.info("Sent 'DriverAssignedMessage' for ride " + rideId);
     }
 
     private void doSendRideStartedEventMessage(JsonObject msgIn) {
@@ -184,11 +186,13 @@ public class MessageProducerVerticle extends AbstractVerticle {
         msgOut.put("sender", "DriverServiceSimulator");
         msgOut.put("timestamp", Instant.now().toEpochMilli());
         JsonObject payload = new JsonObject();
-        payload.put("rideId", msgIn.getJsonObject("payload").getString("rideId"));
+        String rideId = msgIn.getJsonObject("payload").getString("rideId");
+        payload.put("rideId", rideId);
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
         sendMessageToTopic(msgOut, rideEventProducer);
+        log.info("Sent 'RideStartedMessage' for ride " + rideId);
     }
 
     private void doSendRideEndedEventMessage(JsonObject msgIn) {
@@ -199,11 +203,13 @@ public class MessageProducerVerticle extends AbstractVerticle {
         msgOut.put("sender", "DriverServiceSimulator");
         msgOut.put("timestamp", Instant.now().toEpochMilli());
         JsonObject payload = new JsonObject();
-        payload.put("rideId", msgIn.getJsonObject("payload").getString("rideId"));
+        String rideId = msgIn.getJsonObject("payload").getString("rideId");
+        payload.put("rideId", rideId);
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
         sendMessageToTopic(msgOut, rideEventProducer);
+        log.info("Sent 'RideEndedMessage' for ride " + rideId);
     }
 
     private void sendMessageToTopic(JsonObject msg, MessageProducer<JsonObject> messageProducer) {
