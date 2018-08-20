@@ -77,11 +77,7 @@ public class MessageConsumerVerticle extends AbstractVerticle {
             }
             log.info("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
             // send message to producer verticle
-            vertx.eventBus().<JsonObject>send("message-producer", message, ar -> {
-                if (!ar.succeeded()) {
-                    log.error("Failed sending message to producer verticle.", ar.cause());
-                }
-            });
+            vertx.eventBus().<JsonObject>send("message-producer", message);
         });
     }
 

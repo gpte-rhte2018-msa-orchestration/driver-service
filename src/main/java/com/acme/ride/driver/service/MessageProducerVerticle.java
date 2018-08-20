@@ -133,8 +133,8 @@ public class MessageProducerVerticle extends AbstractVerticle {
     }
 
     private void sendRideStartedEventMessage(final Message<JsonObject> msgIn) {
+
         if (dropRideStartedEvent(getRideId(msgIn.body()))) {
-            msgIn.reply(null);
             return;
         }
         vertx.setTimer(delayBeforeMessage(minDelayBeforeRideStartedEvent, maxDelayBeforeRideStartedEvent), i -> {
@@ -146,7 +146,6 @@ public class MessageProducerVerticle extends AbstractVerticle {
     private void sendRideEndedEventMessage(final Message<JsonObject> msgIn) {
         vertx.setTimer(delayBeforeMessage(minDelayBeforeRideEndedEvent, maxDelayBeforeRideEndedEvent), i -> {
             doSendRideEndedEventMessage(msgIn.body());
-            msgIn.reply(null);
         });
     }
 
