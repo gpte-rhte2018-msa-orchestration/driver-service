@@ -2,12 +2,17 @@ package com.acme.ride.driver.service;
 
 import java.io.UnsupportedEncodingException;
 
+import com.acme.ride.driver.service.tracing.TracingUtils;
+import io.opentracing.Scope;
+import io.opentracing.Tracer;
+import io.opentracing.util.GlobalTracer;
 import io.vertx.amqpbridge.AmqpBridge;
 import io.vertx.amqpbridge.AmqpBridgeOptions;
 import io.vertx.amqpbridge.AmqpConstants;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.eventbus.Message;
+import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -19,6 +24,8 @@ public class MessageConsumerVerticle extends AbstractVerticle {
     private final static Logger log = LoggerFactory.getLogger("MessageConsumer");
 
     private AmqpBridge bridge;
+
+    private Tracer tracer;
 
     @Override
     public void start(Future<Void> startFuture) throws Exception {
@@ -48,6 +55,7 @@ public class MessageConsumerVerticle extends AbstractVerticle {
                 startFuture.complete();
             }
         });
+        tracer = GlobalTracer.get();
     }
 
     private void bridgeStarted() {
@@ -80,8 +88,18 @@ public class MessageConsumerVerticle extends AbstractVerticle {
             return;
         }
         log.debug("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
+
+        //tracing
+        Scope scope = TracingUtils.buildFollowingSpan(msgBody, tracer);
+
         // send message to producer verticle
-        vertx.eventBus().<JsonObject>send("message-producer", message);
+        try {
+            vertx.eventBus().<JsonObject>send("message-producer", message, TracingUtils.injectSpan(new DeliveryOptions(), tracer));
+        } finally {
+            if (scope != null) {
+                scope.close();
+            }
+        }
     }
 
     private void handleExceptions(Throwable t) {

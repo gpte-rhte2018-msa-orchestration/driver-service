@@ -5,6 +5,10 @@ import java.math.BigInteger;
 import java.time.Instant;
 import java.util.UUID;
 
+import com.acme.ride.driver.service.tracing.TracingUtils;
+import io.opentracing.Span;
+import io.opentracing.Tracer;
+import io.opentracing.util.GlobalTracer;
 import io.vertx.amqpbridge.AmqpBridge;
 import io.vertx.amqpbridge.AmqpBridgeOptions;
 import io.vertx.amqpbridge.AmqpConstants;
@@ -22,6 +26,8 @@ public class MessageProducerVerticle extends AbstractVerticle {
     private final static Logger log = LoggerFactory.getLogger("MessageProducer");
 
     private AmqpBridge bridge;
+
+    private Tracer tracer;
 
     private MessageProducer<JsonObject> driverEventProducer;
 
@@ -74,6 +80,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
         maxDelayBeforeRideStartedEvent = config().getInteger("ride.started.max.delay", 10);
         minDelayBeforeRideEndedEvent = config().getInteger("ride.ended.min.delay", 5);
         maxDelayBeforeRideEndedEvent = config().getInteger("ride.ended.max.delay", 10);
+        tracer = GlobalTracer.get();
     }
 
     private void bridgeStarted() {
@@ -127,7 +134,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     private void sendDriverAssignedMessage(final Message<JsonObject> msgIn, final String driverId) {
         vertx.setTimer(delayBeforeMessage(minDelayBeforeDriverAssignedEvent, maxDelayBeforeDriverAssignedEvent), i -> {
-            doSendDriverAssignedMessage(msgIn.body(), driverId);
+            doSendDriverAssignedMessage(msgIn, driverId);
             sendRideStartedEventMessage(msgIn);
         });
     }
@@ -138,14 +145,14 @@ public class MessageProducerVerticle extends AbstractVerticle {
             return;
         }
         vertx.setTimer(delayBeforeMessage(minDelayBeforeRideStartedEvent, maxDelayBeforeRideStartedEvent), i -> {
-            doSendRideStartedEventMessage(msgIn.body());
+            doSendRideStartedEventMessage(msgIn);
             sendRideEndedEventMessage(msgIn);
         });
     }
 
     private void sendRideEndedEventMessage(final Message<JsonObject> msgIn) {
         vertx.setTimer(delayBeforeMessage(minDelayBeforeRideEndedEvent, maxDelayBeforeRideEndedEvent), i -> {
-            doSendRideEndedEventMessage(msgIn.body());
+            doSendRideEndedEventMessage(msgIn);
         });
     }
 
@@ -160,7 +167,8 @@ public class MessageProducerVerticle extends AbstractVerticle {
         return s.add(new BigDecimal(Math.random()).multiply(new BigDecimal(e.subtract(s))).toBigInteger());
     }
 
-    private void doSendDriverAssignedMessage(JsonObject msgIn, String driverId) {
+    private void doSendDriverAssignedMessage(Message<JsonObject> msg, String driverId) {
+        JsonObject msgIn = msg.body();
         JsonObject msgOut = new JsonObject();
         msgOut.put("messageType","DriverAssignedEvent");
         msgOut.put("id", UUID.randomUUID().toString());
@@ -173,11 +181,12 @@ public class MessageProducerVerticle extends AbstractVerticle {
         payload.put("driverId", driverId);
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, driverEventProducer);
+        sendMessageToTopic(msgOut, driverEventProducer, msg);
         log.debug("Sent 'DriverAssignedMessage' for ride " + rideId);
     }
 
-    private void doSendRideStartedEventMessage(JsonObject msgIn) {
+    private void doSendRideStartedEventMessage(Message<JsonObject> msg) {
+        JsonObject msgIn = msg.body();
         JsonObject msgOut = new JsonObject();
         msgOut.put("messageType","RideStartedEvent");
         msgOut.put("id", UUID.randomUUID().toString());
@@ -190,11 +199,12 @@ public class MessageProducerVerticle extends AbstractVerticle {
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, rideEventProducer);
+        sendMessageToTopic(msgOut, rideEventProducer, msg);
         log.debug("Sent 'RideStartedMessage' for ride " + rideId);
     }
 
-    private void doSendRideEndedEventMessage(JsonObject msgIn) {
+    private void doSendRideEndedEventMessage(Message<JsonObject> msg) {
+        JsonObject msgIn = msg.body();
         JsonObject msgOut = new JsonObject();
         msgOut.put("messageType","RideEndedEvent");
         msgOut.put("id", UUID.randomUUID().toString());
@@ -207,19 +217,25 @@ public class MessageProducerVerticle extends AbstractVerticle {
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, rideEventProducer);
+        sendMessageToTopic(msgOut, rideEventProducer, msg);
         log.debug("Sent 'RideEndedMessage' for ride " + rideId);
     }
 
-    private void sendMessageToTopic(JsonObject body, MessageProducer<JsonObject> messageProducer) {
+
+    private void sendMessageToTopic(JsonObject msgOut, MessageProducer<JsonObject> messageProducer, Message<JsonObject> msg) {
         JsonObject amqpMsg = new JsonObject();
         amqpMsg.put(AmqpConstants.BODY_TYPE, AmqpConstants.BODY_TYPE_VALUE);
-        amqpMsg.put(AmqpConstants.BODY, body.toString());
+        amqpMsg.put(AmqpConstants.BODY, msgOut.toString());
         JsonObject annotations = new JsonObject();
         byte b = 5;
         annotations.put("x-opt-jms-msg-type", b);
         amqpMsg.put(AmqpConstants.MESSAGE_ANNOTATIONS, annotations);
-        messageProducer.send(amqpMsg);
+        Span span = TracingUtils.buildAndInjectSpan(amqpMsg, tracer, msg);
+        try {
+            messageProducer.send(amqpMsg);
+        } finally {
+            span.finish();
+        }
     }
 
     private String getRideId(JsonObject message) {
