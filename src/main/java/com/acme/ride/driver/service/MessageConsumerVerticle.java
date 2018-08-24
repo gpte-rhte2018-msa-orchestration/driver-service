@@ -72,10 +72,10 @@ public class MessageConsumerVerticle extends AbstractVerticle {
             }
             String messageType = message.getString("messageType");
             if (!("AssignDriverCommand".equals(messageType))) {
-                log.warn("Unexpected message type '" + messageType + "' in message " + message + ". Ignoring message");
+                log.debug("Unexpected message type '" + messageType + "' in message " + message + ". Ignoring message");
                 return;
             }
-            log.info("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
+            log.debug("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
             // send message to producer verticle
             vertx.eventBus().<JsonObject>send("message-producer", message);
         });

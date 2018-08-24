@@ -174,7 +174,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
         msgOut.put("payload", payload);
 
         sendMessageToTopic(msgOut, driverEventProducer);
-        log.info("Sent 'DriverAssignedMessage' for ride " + rideId);
+        log.debug("Sent 'DriverAssignedMessage' for ride " + rideId);
     }
 
     private void doSendRideStartedEventMessage(JsonObject msgIn) {
@@ -191,7 +191,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
         msgOut.put("payload", payload);
 
         sendMessageToTopic(msgOut, rideEventProducer);
-        log.info("Sent 'RideStartedMessage' for ride " + rideId);
+        log.debug("Sent 'RideStartedMessage' for ride " + rideId);
     }
 
     private void doSendRideEndedEventMessage(JsonObject msgIn) {
@@ -208,7 +208,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
         msgOut.put("payload", payload);
 
         sendMessageToTopic(msgOut, rideEventProducer);
-        log.info("Sent 'RideEndedMessage' for ride " + rideId);
+        log.debug("Sent 'RideEndedMessage' for ride " + rideId);
     }
 
     private void sendMessageToTopic(JsonObject msg, MessageProducer<JsonObject> messageProducer) {

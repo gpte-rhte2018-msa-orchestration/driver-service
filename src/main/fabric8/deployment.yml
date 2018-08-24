@@ -32,7 +32,7 @@ spec:
               memory: 200Mi
           env:
             - name: JAVA_OPTIONS
-              value: "-Dapplication.configmap=driver-service"
+              value: "-Dapplication.configmap=driver-service -Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory"
           volumeMounts:
             - name: truststore
               mountPath: /app/truststore
