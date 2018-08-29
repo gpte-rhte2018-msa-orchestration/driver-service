@@ -7,6 +7,7 @@ import io.vertx.amqpbridge.AmqpBridgeOptions;
 import io.vertx.amqpbridge.AmqpConstants;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
+import io.vertx.core.eventbus.Message;
 import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
@@ -52,37 +53,39 @@ public class MessageConsumerVerticle extends AbstractVerticle {
     private void bridgeStarted() {
         MessageConsumer<JsonObject> consumer = bridge.<JsonObject>createConsumer(config().getString("amqp.consumer.driver-command"))
                 .exceptionHandler(this::handleExceptions);
-        consumer.handler(msg -> {
-            JsonObject msgBody = msg.body();
-            JsonObject message = null;
-            if (AmqpConstants.BODY_TYPE_DATA.equals(msgBody.getString(AmqpConstants.BODY_TYPE))) {
-                try {
-                    message = new JsonObject(new String(msgBody.getBinary(AmqpConstants.BODY, new byte[]{}), "UTF-8"));
-                } catch (UnsupportedEncodingException ignore) {
-                }
-            } else if (AmqpConstants.BODY_TYPE_VALUE.equals(msgBody.getString(AmqpConstants.BODY_TYPE))) {
-                message = new JsonObject(msgBody.getString("body"));
-            } else {
-                log.warn("Unsupported AMQP Message Type " + msgBody.getString(AmqpConstants.BODY_TYPE) + ". Ignoring message");
-                return;
+        consumer.handler(this::handleMessage);
+    }
+
+    private void handleMessage(Message<JsonObject> msg) {
+        JsonObject msgBody = msg.body();
+        JsonObject message = null;
+        if (AmqpConstants.BODY_TYPE_DATA.equals(msgBody.getString(AmqpConstants.BODY_TYPE))) {
+            try {
+                message = new JsonObject(new String(msgBody.getBinary(AmqpConstants.BODY, new byte[]{}), "UTF-8"));
+            } catch (UnsupportedEncodingException ignore) {
             }
-            if (message == null || message.isEmpty()) {
-                log.warn("Message " + msgBody.toString() + " has no contents. Ignoring message");
-                return;
-            }
-            String messageType = message.getString("messageType");
-            if (!("AssignDriverCommand".equals(messageType))) {
-                log.debug("Unexpected message type '" + messageType + "' in message " + message + ". Ignoring message");
-                return;
-            }
-            log.debug("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
-            // send message to producer verticle
-            vertx.eventBus().<JsonObject>send("message-producer", message);
-        });
+        } else if (AmqpConstants.BODY_TYPE_VALUE.equals(msgBody.getString(AmqpConstants.BODY_TYPE))) {
+            message = new JsonObject(msgBody.getString("body"));
+        } else {
+            log.warn("Unsupported AMQP Message Type " + msgBody.getString(AmqpConstants.BODY_TYPE) + ". Ignoring message");
+            return;
+        }
+        if (message == null || message.isEmpty()) {
+            log.warn("Message " + msgBody.toString() + " has no contents. Ignoring message");
+            return;
+        }
+        String messageType = message.getString("messageType");
+        if (!("AssignDriverCommand".equals(messageType))) {
+            log.debug("Unexpected message type '" + messageType + "' in message " + message + ". Ignoring message");
+            return;
+        }
+        log.debug("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
+        // send message to producer verticle
+        vertx.eventBus().<JsonObject>send("message-producer", message);
     }
 
     private void handleExceptions(Throwable t) {
-        t.printStackTrace();
+        log.error("Exception on AMQP consumer", t);
     }
 
     @Override

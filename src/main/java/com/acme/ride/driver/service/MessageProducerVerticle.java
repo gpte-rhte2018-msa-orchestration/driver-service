@@ -211,10 +211,10 @@ public class MessageProducerVerticle extends AbstractVerticle {
         log.debug("Sent 'RideEndedMessage' for ride " + rideId);
     }
 
-    private void sendMessageToTopic(JsonObject msg, MessageProducer<JsonObject> messageProducer) {
+    private void sendMessageToTopic(JsonObject body, MessageProducer<JsonObject> messageProducer) {
         JsonObject amqpMsg = new JsonObject();
         amqpMsg.put(AmqpConstants.BODY_TYPE, AmqpConstants.BODY_TYPE_VALUE);
-        amqpMsg.put(AmqpConstants.BODY, msg.toString());
+        amqpMsg.put(AmqpConstants.BODY, body.toString());
         JsonObject annotations = new JsonObject();
         byte b = 5;
         annotations.put("x-opt-jms-msg-type", b);
@@ -227,7 +227,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
     }
 
     private void handleExceptions(Throwable t) {
-        t.printStackTrace();
+        log.error("Exception on AMQP Producer", t);
     }
 
     @Override
