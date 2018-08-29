@@ -1,87 +1,83 @@
 package com.acme.ride.driver.service;
 
-import java.io.UnsupportedEncodingException;
+import javax.jms.Connection;
+import javax.jms.ConnectionFactory;
+import javax.jms.JMSException;
+import javax.jms.MessageConsumer;
+import javax.jms.Session;
+import javax.jms.TextMessage;
+import javax.jms.Topic;
 
-import io.vertx.amqpbridge.AmqpBridge;
-import io.vertx.amqpbridge.AmqpBridgeOptions;
-import io.vertx.amqpbridge.AmqpConstants;
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.Context;
 import io.vertx.core.Future;
-import io.vertx.core.eventbus.Message;
-import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
-import io.vertx.core.net.JksOptions;
+import org.apache.qpid.jms.JmsConnectionFactory;
+import org.messaginghub.pooled.jms.JmsPoolConnectionFactory;
 
 public class MessageConsumerVerticle extends AbstractVerticle {
 
     private final static Logger log = LoggerFactory.getLogger("MessageConsumer");
 
-    private AmqpBridge bridge;
+    private ConnectionFactory connectionFactory;
 
     @Override
     public void start(Future<Void> startFuture) throws Exception {
-        AmqpBridgeOptions bridgeOptions = new AmqpBridgeOptions();
-        bridgeOptions.setSsl(config().getBoolean("amqp.ssl"));
-        bridgeOptions.setTrustAll(config().getBoolean("amqp.ssl.trustall"));
-        bridgeOptions.setHostnameVerificationAlgorithm(!config().getBoolean("amqp.ssl.verifyhost") ? "" : "HTTPS");
-        bridgeOptions.setReplyHandlingSupport(config().getBoolean("amqp.replyhandling"));
-        if (!bridgeOptions.isTrustAll()) {
-            JksOptions jksOptions = new JksOptions()
-                    .setPath(config().getString("amqp.truststore.path"))
-                    .setPassword(config().getString("amqp.truststore.password"));
-            bridgeOptions.setTrustStoreOptions(jksOptions);
+        connectionFactory = createPooledConnectionFactory();
+        try {
+            setupConsumer();
+            startFuture.complete();
+        } catch (JMSException e) {
+            startFuture.fail(e);
         }
-        bridge = AmqpBridge.create(vertx, bridgeOptions);
-        String host = config().getString("amqp.host");
-        int port = config().getInteger("amqp.port");
-        String username = config().getString("amqp.user", "anonymous");
-        String password = config().getString("amqp.password", "anonymous");
-        bridge.start(host, port, username, password, ar -> {
-            if (ar.failed()) {
-                log.warn("Bridge startup failed");
-                startFuture.fail(ar.cause());
-            } else {
-                log.info("AMQP bridge to " + host + ":" + port + " started");
-                bridgeStarted();
-                startFuture.complete();
-            }
-        });
     }
 
-    private void bridgeStarted() {
-        MessageConsumer<JsonObject> consumer = bridge.<JsonObject>createConsumer(config().getString("amqp.consumer.driver-command"))
-                .exceptionHandler(this::handleExceptions);
-        consumer.handler(this::handleMessage);
+    private ConnectionFactory createPooledConnectionFactory() {
+        JmsPoolConnectionFactory factory = new JmsPoolConnectionFactory();
+        factory.setConnectionFactory(createConnectionFactory());
+        factory.setExplicitProducerCacheSize(config().getInteger("amqp.pool.explicit-producer-cache-size"));
+        factory.setUseAnonymousProducers(config().getBoolean("amqp.pool.use-anonymous-producers"));
+        return factory;
     }
 
-    private void handleMessage(Message<JsonObject> msg) {
-        JsonObject msgBody = msg.body();
-        JsonObject message = null;
-        if (AmqpConstants.BODY_TYPE_DATA.equals(msgBody.getString(AmqpConstants.BODY_TYPE))) {
-            try {
-                message = new JsonObject(new String(msgBody.getBinary(AmqpConstants.BODY, new byte[]{}), "UTF-8"));
-            } catch (UnsupportedEncodingException ignore) {
-            }
-        } else if (AmqpConstants.BODY_TYPE_VALUE.equals(msgBody.getString(AmqpConstants.BODY_TYPE))) {
-            message = new JsonObject(msgBody.getString("body"));
-        } else {
-            log.warn("Unsupported AMQP Message Type " + msgBody.getString(AmqpConstants.BODY_TYPE) + ". Ignoring message");
-            return;
-        }
-        if (message == null || message.isEmpty()) {
-            log.warn("Message " + msgBody.toString() + " has no contents. Ignoring message");
-            return;
-        }
-        String messageType = message.getString("messageType");
-        if (!("AssignDriverCommand".equals(messageType))) {
-            log.debug("Unexpected message type '" + messageType + "' in message " + message + ". Ignoring message");
-            return;
-        }
-        log.debug("Consumed 'AssignedDriverCommand' message for ride " + message.getJsonObject("payload").getString("rideId"));
-        // send message to producer verticle
-        vertx.eventBus().<JsonObject>send("message-producer", message);
+    private JmsConnectionFactory createConnectionFactory() {
+
+        JmsConnectionFactory factory = new JmsConnectionFactory();
+        factory.setRemoteURI(config().getString("amqp.protocol") + "://" + config().getString("amqp.host")
+                + ":" + config().getInteger("amqp.port") + "?" + config().getString("amqp.query"));
+        factory.setUsername(config().getString("amqp.user"));
+        factory.setPassword(config().getString("amqp.password"));
+        return factory;
+    }
+
+    private void setupConsumer() throws JMSException {
+            Connection connection = connectionFactory.createConnection();
+            Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+            Topic topic = session.createTopic(config().getString("amqp.consumer.driver-command"));
+            MessageConsumer consumer = session.createSharedDurableConsumer(topic, config().getString("amqp.subscription.driver-command"));
+            final Context context = vertx.getOrCreateContext();
+            consumer.setMessageListener(message -> context.runOnContext(v -> {
+                try {
+                    if (!(message instanceof TextMessage)) {
+                        log.warn("Unexpected Message Type - ignoring:" + message.getClass().getName());
+                        return;
+                    }
+                    JsonObject msgBody = new JsonObject(((TextMessage)message).getText());
+                    String messageType = msgBody.getString("messageType");
+                    if (!("AssignDriverCommand".equals(messageType))) {
+                        log.debug("Unexpected message type '" + messageType + "' in message " + msgBody + ". Ignoring message");
+                        return;
+                    }
+                    log.debug("Consumed 'AssignedDriverCommand' message for ride " + msgBody.getJsonObject("payload").getString("rideId"));
+                    // send message to producer verticle
+                    vertx.eventBus().<JsonObject>send("message-producer", msgBody);
+                } catch (JMSException e) {
+                    log.error("Exception when consuming message");
+                }
+            }));
+            connection.start();
     }
 
     private void handleExceptions(Throwable t) {
@@ -90,9 +86,7 @@ public class MessageConsumerVerticle extends AbstractVerticle {
 
     @Override
     public void stop(Future<Void> stopFuture) throws Exception {
-        if (bridge != null) {
-            bridge.close(ar -> {});
-        }
+        ((JmsPoolConnectionFactory) connectionFactory).stop();
         stopFuture.complete();
     }
 }
