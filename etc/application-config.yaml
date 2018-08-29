@@ -14,6 +14,11 @@ amqp.consumer.driver-command: topic-driver-command
 amqp.producer.driver-event: topic-driver-event
 amqp.producer.ride-event: topic-ride-event
 
+amqp.query: transport.trustAll=false&transport.verifyHost=true
+amqp.protocol: amqps
+amqp.pool.explicit-producer-cache-size: 5
+amqp.pool.use-anonymous-producers: false
+
 http.port: 8080
 
 # delay before sending a `DriverAssignedEvent` message

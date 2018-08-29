@@ -4,28 +4,29 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Instant;
 import java.util.UUID;
+import javax.jms.CompletionListener;
+import javax.jms.Connection;
+import javax.jms.ConnectionFactory;
+import javax.jms.Destination;
+import javax.jms.JMSException;
+import javax.jms.Session;
+import javax.jms.TextMessage;
 
-import io.vertx.amqpbridge.AmqpBridge;
-import io.vertx.amqpbridge.AmqpBridgeOptions;
-import io.vertx.amqpbridge.AmqpConstants;
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.eventbus.Message;
-import io.vertx.core.eventbus.MessageProducer;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
-import io.vertx.core.net.JksOptions;
+import org.apache.qpid.jms.JmsConnectionFactory;
+import org.messaginghub.pooled.jms.JmsPoolConnectionFactory;
 
 public class MessageProducerVerticle extends AbstractVerticle {
 
     private final static Logger log = LoggerFactory.getLogger("MessageProducer");
 
-    private AmqpBridge bridge;
-
-    private MessageProducer<JsonObject> driverEventProducer;
-
-    private MessageProducer<JsonObject> rideEventProducer;
+    private ConnectionFactory connectionFactory;
 
     private int minDelayBeforeDriverAssignedEvent;
 
@@ -41,45 +42,47 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     @Override
     public void start(Future<Void> startFuture) throws Exception {
-        AmqpBridgeOptions bridgeOptions = new AmqpBridgeOptions();
-        bridgeOptions.setConnectTimeout(10000);
-        bridgeOptions.setSsl(config().getBoolean("amqp.ssl"));
-        bridgeOptions.setTrustAll(config().getBoolean("amqp.ssl.trustall"));
-        bridgeOptions.setHostnameVerificationAlgorithm(!config().getBoolean("amqp.ssl.verifyhost") ? "" : "HTTPS");
-        bridgeOptions.setReplyHandlingSupport(config().getBoolean("amqp.replyhandling"));
-        if (!bridgeOptions.isTrustAll()) {
-            JksOptions jksOptions = new JksOptions()
-                    .setPath(config().getString("amqp.truststore.path"))
-                    .setPassword(config().getString("amqp.truststore.password"));
-            bridgeOptions.setTrustStoreOptions(jksOptions);
-        }
-        bridge = AmqpBridge.create(vertx, bridgeOptions);
-        String host = config().getString("amqp.host");
-        int port = config().getInteger("amqp.port");
-        String username = config().getString("amqp.user", "anonymous");
-        String password = config().getString("amqp.password", "anonymous");
-        bridge.start(host, port, username, password, ar -> {
-            if (ar.failed()) {
-                log.warn("Bridge startup failed");
-                startFuture.fail(ar.cause());
-            } else {
-                log.info("AMQP bridge to " + host + ":" + port + " started");
-                bridgeStarted();
-                startFuture.complete();
-            }
-        });
+
+        connectionFactory = createPooledConnectionFactory();
+
         minDelayBeforeDriverAssignedEvent = config().getInteger("driver.assigned.min.delay", 1);
         maxDelayBeforeDriverAssignedEvent = config().getInteger("driver.assigned.max.delay", 3);
         minDelayBeforeRideStartedEvent = config().getInteger("ride.started.min.delay", 5);
         maxDelayBeforeRideStartedEvent = config().getInteger("ride.started.max.delay", 10);
         minDelayBeforeRideEndedEvent = config().getInteger("ride.ended.min.delay", 5);
         maxDelayBeforeRideEndedEvent = config().getInteger("ride.ended.max.delay", 10);
+
+        vertx.eventBus().consumer("message-producer", this::handleMessage);
+
+        startFuture.complete();
     }
 
-    private void bridgeStarted() {
-        driverEventProducer = bridge.<JsonObject>createProducer(config().getString("amqp.producer.driver-event")).exceptionHandler(this::handleExceptions);
-        rideEventProducer = bridge.<JsonObject>createProducer(config().getString("amqp.producer.ride-event")).exceptionHandler(this::handleExceptions);
-        vertx.eventBus().consumer("message-producer", this::handleMessage);
+    private ConnectionFactory createPooledConnectionFactory() {
+        JmsPoolConnectionFactory factory = new JmsPoolConnectionFactory();
+        factory.setConnectionFactory(createConnectionFactory());
+        factory.setExplicitProducerCacheSize(config().getInteger("amqp.pool.explicit-producer-cache-size"));
+        factory.setUseAnonymousProducers(config().getBoolean("amqp.pool.use-anonymous-producers"));
+        return factory;
+    }
+
+    private JmsConnectionFactory createConnectionFactory() {
+
+        JmsConnectionFactory factory = new JmsConnectionFactory();
+        factory.setRemoteURI(config().getString("amqp.protocol") + "://" + config().getString("amqp.host")
+            + ":" + config().getInteger("amqp.port") + "?" + config().getString("amqp.query"));
+        factory.setUsername(config().getString("amqp.user"));
+        factory.setPassword(config().getString("amqp.password"));
+        return factory;
+    }
+
+    private Session session() throws JMSException {
+        Connection connection = connectionFactory.createConnection();
+        Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+        return session;
+    }
+
+    private Destination resolveDestination(Session session, String destination) throws JMSException {
+        return session.createTopic(destination);
     }
 
     private void handleMessage(Message<JsonObject> msg) {
@@ -162,7 +165,8 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     private void doSendDriverAssignedMessage(JsonObject msgIn, String driverId) {
         JsonObject msgOut = new JsonObject();
-        msgOut.put("messageType","DriverAssignedEvent");
+        String messageType = "DriverAssignedEvent";
+        msgOut.put("messageType", messageType);
         msgOut.put("id", UUID.randomUUID().toString());
         msgOut.put("traceId", msgIn.getString("traceId"));
         msgOut.put("sender", "DriverServiceSimulator");
@@ -173,13 +177,13 @@ public class MessageProducerVerticle extends AbstractVerticle {
         payload.put("driverId", driverId);
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, driverEventProducer);
-        log.debug("Sent 'DriverAssignedMessage' for ride " + rideId);
+        sendMessageToTopic(msgOut, config().getString("amqp.producer.driver-event"), messageType, rideId);
     }
 
     private void doSendRideStartedEventMessage(JsonObject msgIn) {
         JsonObject msgOut = new JsonObject();
-        msgOut.put("messageType","RideStartedEvent");
+        String messageType = "RideStartedEvent";
+        msgOut.put("messageType", messageType);
         msgOut.put("id", UUID.randomUUID().toString());
         msgOut.put("traceId", msgIn.getString("traceId"));
         msgOut.put("sender", "DriverServiceSimulator");
@@ -190,13 +194,13 @@ public class MessageProducerVerticle extends AbstractVerticle {
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, rideEventProducer);
-        log.debug("Sent 'RideStartedMessage' for ride " + rideId);
+        sendMessageToTopic(msgOut, config().getString("amqp.producer.ride-event"), messageType, rideId);
     }
 
     private void doSendRideEndedEventMessage(JsonObject msgIn) {
         JsonObject msgOut = new JsonObject();
-        msgOut.put("messageType","RideEndedEvent");
+        String messageType = "RideEndedEvent";
+        msgOut.put("messageType", messageType);
         msgOut.put("id", UUID.randomUUID().toString());
         msgOut.put("traceId", msgIn.getString("traceId"));
         msgOut.put("sender", "DriverServiceSimulator");
@@ -207,19 +211,20 @@ public class MessageProducerVerticle extends AbstractVerticle {
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, rideEventProducer);
-        log.debug("Sent 'RideEndedMessage' for ride " + rideId);
+        sendMessageToTopic(msgOut, config().getString("amqp.producer.ride-event"), messageType, rideId);
     }
 
-    private void sendMessageToTopic(JsonObject body, MessageProducer<JsonObject> messageProducer) {
-        JsonObject amqpMsg = new JsonObject();
-        amqpMsg.put(AmqpConstants.BODY_TYPE, AmqpConstants.BODY_TYPE_VALUE);
-        amqpMsg.put(AmqpConstants.BODY, body.toString());
-        JsonObject annotations = new JsonObject();
-        byte b = 5;
-        annotations.put("x-opt-jms-msg-type", b);
-        amqpMsg.put(AmqpConstants.MESSAGE_ANNOTATIONS, annotations);
-        messageProducer.send(amqpMsg);
+    private void sendMessageToTopic(JsonObject msg, String destination, String type, String id) {
+        try {
+            final Context context = vertx.getOrCreateContext();
+            Session session = session();
+            Destination topic = resolveDestination(session, destination);
+            TextMessage message = session.createTextMessage(msg.toString());
+            javax.jms.MessageProducer producer = session.createProducer(topic);
+            producer.send(message, new MyCompletionListener(context, type, id));
+        } catch (JMSException e) {
+            e.printStackTrace();
+        }
     }
 
     private String getRideId(JsonObject message) {
@@ -232,15 +237,34 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     @Override
     public void stop(Future<Void> stopFuture) throws Exception {
-        if (driverEventProducer != null) {
-            driverEventProducer.close();
-        }
-        if (rideEventProducer != null) {
-            rideEventProducer.close();
-        }
-        if (bridge != null) {
-            bridge.close(ar -> {});
-        }
+        ((JmsPoolConnectionFactory) connectionFactory).stop();
         stopFuture.complete();
+    }
+
+    private static class MyCompletionListener implements CompletionListener {
+
+        private Context context;
+        private String type;
+        private String rideId;
+
+        private MyCompletionListener(Context context, String type, String rideId) {
+            this.context = context;
+            this.type = type;
+            this.rideId = rideId;
+        }
+
+        @Override
+        public void onCompletion(javax.jms.Message message) {
+            context.runOnContext(v -> {
+                log.debug("Sent " + type + " for ride " + rideId);
+            });
+        }
+
+        @Override
+        public void onException(javax.jms.Message message, Exception exception) {
+            context.runOnContext(v -> {
+                log.error("Exception sending " + type + " for ride " + rideId, exception);
+            });
+        }
     }
 }
