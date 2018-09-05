@@ -12,6 +12,10 @@ import javax.jms.JMSException;
 import javax.jms.Session;
 import javax.jms.TextMessage;
 
+import com.acme.ride.driver.service.tracing.TracingUtils;
+import io.opentracing.Tracer;
+import io.opentracing.contrib.jms2.TracingMessageProducer;
+import io.opentracing.util.GlobalTracer;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
@@ -27,6 +31,8 @@ public class MessageProducerVerticle extends AbstractVerticle {
     private final static Logger log = LoggerFactory.getLogger("MessageProducer");
 
     private ConnectionFactory connectionFactory;
+
+    private Tracer tracer;
 
     private int minDelayBeforeDriverAssignedEvent;
 
@@ -51,6 +57,8 @@ public class MessageProducerVerticle extends AbstractVerticle {
         maxDelayBeforeRideStartedEvent = config().getInteger("ride.started.max.delay", 10);
         minDelayBeforeRideEndedEvent = config().getInteger("ride.ended.min.delay", 5);
         maxDelayBeforeRideEndedEvent = config().getInteger("ride.ended.max.delay", 10);
+
+        tracer = GlobalTracer.get();
 
         vertx.eventBus().consumer("message-producer", this::handleMessage);
 
@@ -91,6 +99,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
             msg.reply(null);
             return;
         }
+
         sendDriverAssignedMessage(msg, getDriverId());
     }
 
@@ -130,7 +139,7 @@ public class MessageProducerVerticle extends AbstractVerticle {
 
     private void sendDriverAssignedMessage(final Message<JsonObject> msgIn, final String driverId) {
         vertx.setTimer(delayBeforeMessage(minDelayBeforeDriverAssignedEvent, maxDelayBeforeDriverAssignedEvent), i -> {
-            doSendDriverAssignedMessage(msgIn.body(), driverId);
+            doSendDriverAssignedMessage(msgIn, driverId);
             sendRideStartedEventMessage(msgIn);
         });
     }
@@ -141,14 +150,14 @@ public class MessageProducerVerticle extends AbstractVerticle {
             return;
         }
         vertx.setTimer(delayBeforeMessage(minDelayBeforeRideStartedEvent, maxDelayBeforeRideStartedEvent), i -> {
-            doSendRideStartedEventMessage(msgIn.body());
+            doSendRideStartedEventMessage(msgIn);
             sendRideEndedEventMessage(msgIn);
         });
     }
 
     private void sendRideEndedEventMessage(final Message<JsonObject> msgIn) {
         vertx.setTimer(delayBeforeMessage(minDelayBeforeRideEndedEvent, maxDelayBeforeRideEndedEvent), i -> {
-            doSendRideEndedEventMessage(msgIn.body());
+            doSendRideEndedEventMessage(msgIn);
         });
     }
 
@@ -163,65 +172,68 @@ public class MessageProducerVerticle extends AbstractVerticle {
         return s.add(new BigDecimal(Math.random()).multiply(new BigDecimal(e.subtract(s))).toBigInteger());
     }
 
-    private void doSendDriverAssignedMessage(JsonObject msgIn, String driverId) {
+    private void doSendDriverAssignedMessage(Message<JsonObject> msgIn, String driverId) {
         JsonObject msgOut = new JsonObject();
         String messageType = "DriverAssignedEvent";
         msgOut.put("messageType", messageType);
         msgOut.put("id", UUID.randomUUID().toString());
-        msgOut.put("traceId", msgIn.getString("traceId"));
+        msgOut.put("traceId", msgIn.body().getString("traceId"));
         msgOut.put("sender", "DriverServiceSimulator");
         msgOut.put("timestamp", Instant.now().toEpochMilli());
         JsonObject payload = new JsonObject();
-        String rideId = msgIn.getJsonObject("payload").getString("rideId");
+        String rideId = msgIn.body().getJsonObject("payload").getString("rideId");
         payload.put("rideId", rideId);
         payload.put("driverId", driverId);
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, config().getString("amqp.producer.driver-event"), messageType, rideId);
+        sendMessageToTopic(msgOut, config().getString("amqp.producer.driver-event"), msgIn);
     }
 
-    private void doSendRideStartedEventMessage(JsonObject msgIn) {
+    private void doSendRideStartedEventMessage(Message<JsonObject> msgIn) {
         JsonObject msgOut = new JsonObject();
         String messageType = "RideStartedEvent";
         msgOut.put("messageType", messageType);
         msgOut.put("id", UUID.randomUUID().toString());
-        msgOut.put("traceId", msgIn.getString("traceId"));
+        msgOut.put("traceId", msgIn.body().getString("traceId"));
         msgOut.put("sender", "DriverServiceSimulator");
         msgOut.put("timestamp", Instant.now().toEpochMilli());
         JsonObject payload = new JsonObject();
-        String rideId = msgIn.getJsonObject("payload").getString("rideId");
+        String rideId = msgIn.body().getJsonObject("payload").getString("rideId");
         payload.put("rideId", rideId);
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, config().getString("amqp.producer.ride-event"), messageType, rideId);
+        sendMessageToTopic(msgOut, config().getString("amqp.producer.ride-event"), msgIn);
     }
 
-    private void doSendRideEndedEventMessage(JsonObject msgIn) {
+    private void doSendRideEndedEventMessage(Message<JsonObject> msgIn) {
         JsonObject msgOut = new JsonObject();
         String messageType = "RideEndedEvent";
         msgOut.put("messageType", messageType);
         msgOut.put("id", UUID.randomUUID().toString());
-        msgOut.put("traceId", msgIn.getString("traceId"));
+        msgOut.put("traceId", msgIn.body().getString("traceId"));
         msgOut.put("sender", "DriverServiceSimulator");
         msgOut.put("timestamp", Instant.now().toEpochMilli());
         JsonObject payload = new JsonObject();
-        String rideId = msgIn.getJsonObject("payload").getString("rideId");
+        String rideId = msgIn.body().getJsonObject("payload").getString("rideId");
         payload.put("rideId", rideId);
         payload.put("timestamp", Instant.now().toEpochMilli());
         msgOut.put("payload", payload);
 
-        sendMessageToTopic(msgOut, config().getString("amqp.producer.ride-event"), messageType, rideId);
+        sendMessageToTopic(msgOut, config().getString("amqp.producer.ride-event"), msgIn);
     }
 
-    private void sendMessageToTopic(JsonObject msg, String destination, String type, String id) {
+    private void sendMessageToTopic(JsonObject msg, String destination, Message<JsonObject> msgIn) {
         try {
             final Context context = vertx.getOrCreateContext();
             Session session = session();
             Destination topic = resolveDestination(session, destination);
             TextMessage message = session.createTextMessage(msg.toString());
             javax.jms.MessageProducer producer = session.createProducer(topic);
-            producer.send(message, new MyCompletionListener(context, type, id));
+            TracingMessageProducer tracingMessageProducer = new TracingMessageProducer(producer, tracer);
+
+            TracingUtils.injectParentSpan(msgIn, message, tracer);
+            tracingMessageProducer.send(message, new MyCompletionListener(context, msg));
         } catch (JMSException e) {
             e.printStackTrace();
         }
@@ -247,10 +259,10 @@ public class MessageProducerVerticle extends AbstractVerticle {
         private String type;
         private String rideId;
 
-        private MyCompletionListener(Context context, String type, String rideId) {
+        private MyCompletionListener(Context context, JsonObject msg) {
             this.context = context;
-            this.type = type;
-            this.rideId = rideId;
+            this.type = msg.getString("messageType");
+            this.rideId = msg.getJsonObject("payload").getString("rideId");
         }
 
         @Override

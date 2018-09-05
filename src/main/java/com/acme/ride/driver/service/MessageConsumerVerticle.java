@@ -4,13 +4,20 @@ import javax.jms.Connection;
 import javax.jms.ConnectionFactory;
 import javax.jms.JMSException;
 import javax.jms.MessageConsumer;
+import javax.jms.MessageListener;
 import javax.jms.Session;
 import javax.jms.TextMessage;
 import javax.jms.Topic;
 
+import com.acme.ride.driver.service.tracing.TracingUtils;
+import io.opentracing.Span;
+import io.opentracing.Tracer;
+import io.opentracing.contrib.jms.common.TracingMessageListener;
+import io.opentracing.util.GlobalTracer;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Context;
 import io.vertx.core.Future;
+import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
@@ -23,8 +30,11 @@ public class MessageConsumerVerticle extends AbstractVerticle {
 
     private ConnectionFactory connectionFactory;
 
+    private Tracer tracer;
+
     @Override
     public void start(Future<Void> startFuture) throws Exception {
+        tracer = GlobalTracer.get();
         connectionFactory = createPooledConnectionFactory();
         try {
             setupConsumer();
@@ -53,18 +63,25 @@ public class MessageConsumerVerticle extends AbstractVerticle {
     }
 
     private void setupConsumer() throws JMSException {
-            Connection connection = connectionFactory.createConnection();
-            Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
-            Topic topic = session.createTopic(config().getString("amqp.consumer.driver-command"));
-            MessageConsumer consumer = session.createSharedDurableConsumer(topic, config().getString("amqp.subscription.driver-command"));
-            final Context context = vertx.getOrCreateContext();
-            consumer.setMessageListener(message -> context.runOnContext(v -> {
+        Connection connection = connectionFactory.createConnection();
+        Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+        Topic topic = session.createTopic(config().getString("amqp.consumer.driver-command"));
+        MessageConsumer consumer = session.createSharedDurableConsumer(topic, config().getString("amqp.subscription.driver-command"));
+        consumer.setMessageListener(new TracingMessageListener(messageListener(), tracer));
+        connection.start();
+    }
+
+    private MessageListener messageListener() {
+        final Context context = vertx.getOrCreateContext();
+        return (message -> {
+            final Span activeSpan = tracer.activeSpan();
+            context.runOnContext(v -> {
                 try {
                     if (!(message instanceof TextMessage)) {
                         log.warn("Unexpected Message Type - ignoring:" + message.getClass().getName());
                         return;
                     }
-                    JsonObject msgBody = new JsonObject(((TextMessage)message).getText());
+                    JsonObject msgBody = new JsonObject(((TextMessage) message).getText());
                     String messageType = msgBody.getString("messageType");
                     if (!("AssignDriverCommand".equals(messageType))) {
                         log.debug("Unexpected message type '" + messageType + "' in message " + msgBody + ". Ignoring message");
@@ -72,12 +89,12 @@ public class MessageConsumerVerticle extends AbstractVerticle {
                     }
                     log.debug("Consumed 'AssignedDriverCommand' message for ride " + msgBody.getJsonObject("payload").getString("rideId"));
                     // send message to producer verticle
-                    vertx.eventBus().<JsonObject>send("message-producer", msgBody);
+                    vertx.eventBus().<JsonObject>send("message-producer", msgBody, TracingUtils.injectSpan(activeSpan, new DeliveryOptions(), tracer));
                 } catch (JMSException e) {
                     log.error("Exception when consuming message");
                 }
-            }));
-            connection.start();
+            });
+        });
     }
 
     private void handleExceptions(Throwable t) {

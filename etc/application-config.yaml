@@ -24,3 +24,13 @@ ride.started.max.delay: 10
 # delay before sending a `RideEndedEvent` message
 ride.ended.min.delay: 5
 ride.ended.max.delay: 10
+
+service-name: driver-service
+reporter-log-spans: false
+sampler-type: ratelimiting
+sampler-param: 1
+# const
+# sampler-type: const
+# sampler-param: 1
+agent-host: localhost
+agent-port: 6831

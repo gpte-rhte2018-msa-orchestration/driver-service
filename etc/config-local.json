@@ -17,5 +17,9 @@
   "ride.started.min.delay": 5,
   "ride.started.max.delay": 10,
   "ride.ended.min.delay": 5,
-  "ride.ended.max.delay": 10
+  "ride.ended.max.delay": 10,
+  "service-name": "driver-service",
+  "reporter-log-spans": false,
+  "sampler-type": "ratelimiting",
+  "sampler-param": 1
 }
