@@ -20,11 +20,11 @@ http.port: 8080
 driver.assigned.min.delay: 1
 driver.assigned.max.delay: 3
 # delay before sending a `RideStartedEvent` message
-ride.started.min.delay: 5
-ride.started.max.delay: 10
+ride.started.min.delay: 8
+ride.started.max.delay: 15
 # delay before sending a `RideEndedEvent` message
-ride.ended.min.delay: 5
-ride.ended.max.delay: 10
+ride.ended.min.delay: 8
+ride.ended.max.delay: 15
 
 service-name: driver-service
 reporter-log-spans: false
